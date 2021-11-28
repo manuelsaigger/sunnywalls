@@ -21,9 +21,130 @@ import pvlib
 import json
 from PIL import Image
 
+import sunny_helpers
+import sunny_energy_balance
+
+
+def main(cragname, date='today', use_data_srtm=True, use_tiris_far=True, make_plot=True, include_icon_data=False, include_energy_balance=False):
+    
+    
+    # Open crags metadata
+    with open('crags_meta.json') as data_file:
+        crags_meta = json.load(data_file)
+        
+    # check if cragname exists, if not, ask if new one should be created
+    if cragname in list(crags_meta.keys()):
+        print('found crag horizon data....')
+    else:
+        print('Unknown crag, available are: {}'.format(list(crags_meta.keys())))
+        create_new = input('Quit (q) or create a new one (c)?')
+        if create_new == 'q':
+            return
+        elif create_new == 'c':
+            lat_new = float(input('Latitude: '))
+            lon_new = float(input('Longitude: '))
+            
+            # check if new coordinates are within srtm data
+            check_lat = ~np.logical_and(lat_new >= 39, lat_new < 49)
+            check_lon = ~np.logical_and(lon_new >= 3, lon_new < 13)
+            
+            if check_lat or check_lon:
+                raise ValueError('Coordinate are outside default SRTM-range, will not be able to calculate the horizon line, in a perfect wourld, no a option to download new SRTM-data')
+                
+            # include wall direction to shade?
+            wall_dir = int(input('Wall direction? '))
+            wall_angl = int(input('Wall angle? '))
+            rocktype = input('Rocktype? ')
+            tree_str = input('Treeshadow at the wall? (y/n)')
+            
+            if tree_str == 'y':
+                tree = True
+            elif tree_str == 'n':
+                tree = False
+                
+            if use_data_srtm:
+                make_horizon_tiris = False
+                url_to_tiris = None
+            else:
+                make_horizon_tiris = True
+                url_to_tiris = input('URL of Tiris horizon data: ') 
+            
+            
+            sunny_helpers.make_new_crag(cragname, lat_new, lon_new, wall_dir=wall_dir, wall_angl=wall_angl, tree=tree, rocktype=rocktype,
+                                        make_horizon_tiris=make_horizon_tiris, url_to_tiris=url_to_tiris)
+        
+            with open('crags_meta.json') as data_file:
+                crags_meta = json.load(data_file)
+                
+            
+    # configure date
+    if date == 'today':
+        date_pd = pd.to_datetime(date)
+        date_str = str(date_pd)[:10].replace('-', '')
+    
+    elif date == 'tomorrow':
+        date_pd = pd.to_datetime('today') + np.timedelta64(24, 'h')
+        date_str = str(date_pd)[:10].replace('-', '')
+        
+    else:
+        date_str = date
+        
+    # configure horizon type
+    if use_data_srtm:
+        horizon_type = 'srtm'
+    else:
+        if use_tiris_far:
+            horizon_type = 'tiris_far'
+        else:
+            horizon_type = 'tiris'
+    
+        
+    t_day, az_sun, el_sun, az_terrain, el_terrain, t_sunstart, t_sunend, el_terrain_time = sunny_helpers.get_sun_height_duration(crags_meta, cragname, date_str, horizon_type=horizon_type)
+    
+    
+    print('Direct sun possible between {} and {} UTC at {}'.format(t_sunstart, t_sunend, cragname))
+    
+    if include_icon_data:
+        ds_icon = sunny_helpers.get_data_icon(cragname, date_str, crags_meta, include_energy_balance=True)
+        
+        if include_energy_balance:
+                t_day_h, az_sun_h, el_sun_h, az_terrain, el_terrain, t_sunstart_h, t_sunend_h, el_terrain_time_h = sunny_helpers.get_sun_height_duration(
+                    crags_meta, cragname, date_str, horizon_type=horizon_type, dt=60)
+                
+                T_rock = sunny_energy_balance.make_ebalance_day(ds_icon, az_sun_h, el_sun_h, el_terrain_time_h, el_terrain, cragname, crags_meta)
+                
+    else: 
+        T_rock = None
+            
+            
+        
+    print(T_rock)
+    
+    
+    if make_plot:
+        
+        sunny_helpers.make_plot_basic(cragname, date_str, az_terrain, el_terrain, az_sun, el_sun)
+        
+        if include_icon_data:
+            sunny_helpers.make_plot_full(cragname, ds_icon, date_str, t_day, el_sun, el_terrain_time, t_sunstart, t_sunend,
+                                         include_energy_balance=include_energy_balance, T_rock=T_rock)
+        
+        
+    
+        
+    
+    
+    
+    
+    
+    
+    
+    
+
+
 
 def when_comes_the_sun(cragname, date, make_plot=False, path_to_meta='./crags_meta.json', dt=5, use_data_srtm=True):
-    """Main function for sun exposure calculation
+    """old main function for sun exposure calculation
     Workflow: - load horizon elevation for crag (pre-calculated, if not, option to create new one)
               - calculate sun elevation for whole day at crag position
               - when is sun > horizon?
@@ -63,16 +184,20 @@ def when_comes_the_sun(cragname, date, make_plot=False, path_to_meta='./crags_me
                 raise ValueError('Coordinate are outside default SRTM-range, will not be able to calculate the horizon line, in a perfect wourld, no a option to download new SRTM-data')
                 
             # include wall direction to shade?
-            wall_dir = input('Include wall direction? No (n) or wall direction ion degree: ')
-            if wall_dir != 'n':
-                include_wall_dir = True
-                wall_dir = int(wall_dir)
-            else:
-                include_wall_dir = False
+            wall_dir = int(input('Wall direction? '))
+            wall_angl = int(input('Wall angle? '))
+            rocktype = input('Rocktype? ')
+            tree_str = input('Treeshadow at the wall? (y/n)')
+            
+            if tree_str == 'y':
+                tree = True
+            elif tree_str == 'n':
+                tree = False
             
             
             
-            make_new_crag(cragname, lat_new, lon_new, include_wall_dir=include_wall_dir, wall_dir=wall_dir)
+            make_new_crag(cragname, lat_new, lon_new, 
+                          wall_dir=wall_dir, wall_angl=wall_angl, rocktype=rocktype, tree=tree)
         
             with open('crags_meta.json') as data_file:
                 crags_meta = json.load(data_file)
@@ -143,7 +268,7 @@ def when_comes_the_sun(cragname, date, make_plot=False, path_to_meta='./crags_me
 
 
 
-def make_new_crag(cragname, lat_crag, lon_crag, path_to_srtm='./srtm_39_03.tif', path_to_meta='./crags_meta.json', include_wall_dir=False, wall_dir=0):
+def make_new_crag(cragname, lat_crag, lon_crag, path_to_srtm='./srtm_39_03.tif', path_to_meta='./crags_meta.json', wall_dir=0, wall_angl=90, rocktype='limestone', tree=False):
     
     
     with open(path_to_meta) as data_file:
@@ -198,7 +323,7 @@ def make_new_crag(cragname, lat_crag, lon_crag, path_to_srtm='./srtm_39_03.tif',
             
         
         # check for highest elevation angle within sectors of azimut angles
-        daz = 1
+        daz = 1.0
         az_all = np.arange(0, 360, daz)
         # az_all = float(az_all)
         elev_all = []
@@ -215,7 +340,7 @@ def make_new_crag(cragname, lat_crag, lon_crag, path_to_srtm='./srtm_39_03.tif',
         # do some median smooting of elevation angles
         elev_smooth = np.zeros(np.shape(elev_all))
         width_window = 10
-
+        
         for ii in range(width_window, len(elev_smooth)-width_window):
             elev_smooth[ii] = np.median(elev_all[ii-width_window:ii+width_window])
 
@@ -248,6 +373,8 @@ def make_new_crag(cragname, lat_crag, lon_crag, path_to_srtm='./srtm_39_03.tif',
         elev_smooth = list(elev_smooth)
             
         crags_meta[cragname] = {'lat':lat_crag, 'lon':lon_crag, 'azimuth':az_all, 'horizon_elev':elev_smooth}
+        
+        # return crags_meta
             
         print('Saving...')
         json_file = json.dumps(crags_meta)
